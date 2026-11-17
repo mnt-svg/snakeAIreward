@@ -1,156 +1,150 @@
 import random
-import pygame
-import pickle
-import os
-from snakeAIenv import SnakeAIEnvironment
+from collections import deque
 
-CELL_SIZE = 40
-BG_COLOR = (25, 25, 35)
-GRID_COLOR = (40, 40, 55)
-HEAD_COLOR = (0, 230, 118)
-BODY_COLOR = (0, 180, 90)
-FOOD_COLOR = (255, 82, 82)
-TEXT_COLOR = (255, 255, 255)
+class SnakeAIEnvironment:
+    def __init__(self, grid_size=12):
+        self.grid_size = grid_size
+        # 8 hướng quét theo chiều kim đồng hồ bắt đầu từ Hướng Lên (0)
+        self.all_8_dirs = [
+            (-1, 0),  # 0: Lên
+            (-1, 1),  # 1: Chéo Lên-Phải
+            (0, 1),   # 2: Phải
+            (1, 1),   # 3: Chéo Xuống-Phải
+            (1, 0),   # 4: Xuống
+            (1, -1),  # 5: Chéo Xuống-Trái
+            (0, -1),  # 6: Trái
+            (-1, -1)  # 7: Chéo Lên-Trái
+        ]
+        # 4 hướng di chuyển chính: Lên (0), Phải (1), Xuống (2), Trái (3)
+        self.directions = [(-1, 0), (0, 1), (1, 0), (0, -1)]
+        self.reset()
 
-class QLearningAgent:
-    def __init__(self, alpha=0.1, gamma=0.9, epsilon=1.0, brain_file="snake_brain.pkl"):
-        self.q_table = {}
-        self.alpha = alpha
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.brain_file = brain_file
-        self.total_episodes_trained = 0
-        self.best_avg_score = 0.0  # Lưu kỷ lục điểm trung bình cao nhất
-        self.load_brain()
+    def reset(self):
+        mid = self.grid_size // 2
+        self.head = [mid, mid]
+        self.body = [[mid, mid], [mid, mid - 1], [mid, mid - 2]]
+        self.dir_idx = 1
+        self.food = self._spawn_food()
+        self.score = 0
+        self.steps_without_food = 0
+        return self.get_state()
 
-    def get_q_values(self, state):
-        state_key = tuple(state)
-        if state_key not in self.q_table:
-            self.q_table[state_key] = [0.0, 0.0, 0.0]
-        return self.q_table[state_key]
-
-    def choose_action(self, state):
-        if random.random() < self.epsilon:
-            return random.choice([0, 1, 2])
-        q_vals = self.get_q_values(state)
-        return q_vals.index(max(q_vals))
-
-    def learn(self, state, action, reward, next_state, done):
-        q_vals = self.get_q_values(state)
-        next_max = 0.0 if done else max(self.get_q_values(next_state))
-        q_vals[action] += self.alpha * (reward + self.gamma * next_max - q_vals[action])
-
-    def save_brain(self, current_avg_score):
-        # Chỉ lưu nếu đợt train này đạt điểm trung bình tốt hơn hoặc bằng kỷ lục cũ
-        if current_avg_score >= self.best_avg_score:
-            self.best_avg_score = current_avg_score
-            data = {
-                "q_table": self.q_table,
-                "epsilon": self.epsilon,
-                "alpha": self.alpha,
-                "total_episodes": self.total_episodes_trained,
-                "best_avg_score": self.best_avg_score
-            }
-            with open(self.brain_file, "wb") as f:
-                pickle.dump(data, f)
-            print(f"[KỶ LỤC MỚI] Điểm TB: {current_avg_score:.2f} -> Đã lưu bộ não ({self.total_episodes_trained} ván).")
-        else:
-            print(f"[BỎ QUA] Điểm TB đợt này ({current_avg_score:.2f}) thấp hơn kỷ lục ({self.best_avg_score:.2f}), giữ nguyên não cũ.")
-
-    def load_brain(self):
-        if os.path.exists(self.brain_file):
-            with open(self.brain_file, "rb") as f:
-                data = pickle.load(f)
-            self.q_table = data["q_table"]
-            self.epsilon = data["epsilon"]
-            self.alpha = data.get("alpha", 0.05)
-            self.total_episodes_trained = data.get("total_episodes", 0)
-            self.best_avg_score = data.get("best_avg_score", 0.0)
-            print(f"Đã nạp ký ức cũ: {self.total_episodes_trained} ván | Kỷ lục TB: {self.best_avg_score:.2f}")
-        else:
-            print("Chưa có dữ liệu cũ, bắt đầu huấn luyện từ con số 0.")
-
-def draw_game(screen, font, env, total_reward, game_num):
-    screen.fill(BG_COLOR)
-    size = env.grid_size
-    for x in range(0, size * CELL_SIZE, CELL_SIZE):
-        pygame.draw.line(screen, GRID_COLOR, (x, 0), (x, size * CELL_SIZE))
-    for y in range(0, size * CELL_SIZE, CELL_SIZE):
-        pygame.draw.line(screen, GRID_COLOR, (0, y), (size * CELL_SIZE, y))
-
-    food_center = (env.food[1] * CELL_SIZE + CELL_SIZE // 2, env.food[0] * CELL_SIZE + CELL_SIZE // 2)
-    pygame.draw.circle(screen, FOOD_COLOR, food_center, CELL_SIZE // 2 - 4)
-
-    for idx, part in enumerate(env.body):
-        rect = pygame.Rect(part[1] * CELL_SIZE + 2, part[0] * CELL_SIZE + 2, CELL_SIZE - 4, CELL_SIZE - 4)
-        color = HEAD_COLOR if idx == 0 else BODY_COLOR
-        pygame.draw.rect(screen, color, rect, border_radius=8)
-
-    info_text = font.render(f"Van: {game_num} | Diem: {env.score} | Reward: {total_reward:.1f}", True, TEXT_COLOR)
-    screen.blit(info_text, (10, 10))
-    pygame.display.flip()
-
-if __name__ == "__main__":
-    env = SnakeAIEnvironment(grid_size=12)
-    agent = QLearningAgent()
-
-    episodes = 3000
-    recent_scores = []
-    print(f"Đang huấn luyện {episodes} ván...")
-
-    for ep in range(episodes):
-        state = env.reset()
+    def _spawn_food(self):
         while True:
-            action = agent.choose_action(state)
-            next_state, reward, done, score = env.step(action)
-            agent.learn(state, action, reward, next_state, done)
-            state = next_state
-            if done:
-                break
+            pos = [random.randint(0, self.grid_size - 1), random.randint(0, self.grid_size - 1)]
+            if pos not in self.body:
+                return pos
+
+    def _is_collision(self, pt):
+        return (
+            pt[0] < 0 or pt[0] >= self.grid_size or
+            pt[1] < 0 or pt[1] >= self.grid_size or
+            pt in self.body
+        )
+
+    def _manhattan_dist(self, p1, p2):
+        return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
+
+    def _can_reach_tail(self, head_pos, body_list):
+        if len(body_list) <= 2:
+            return True
+        tail = tuple(body_list[-1])
+        obstacles = set(tuple(p) for p in body_list[:-1])
+        queue = deque([tuple(head_pos)])
+        visited = {tuple(head_pos)}
         
-        agent.epsilon = max(0.01, agent.epsilon * 0.997)
-        agent.alpha = max(0.01, agent.alpha * 0.999)  # Giảm dần tốc độ học để ổn định kinh nghiệm
-        agent.total_episodes_trained += 1
+        while queue:
+            curr = queue.popleft()
+            if curr == tail:
+                return True
+            for dr, dc in self.directions:
+                nxt = (curr[0] + dr, curr[1] + dc)
+                if (0 <= nxt[0] < self.grid_size and 
+                    0 <= nxt[1] < self.grid_size and 
+                    nxt not in obstacles and 
+                    nxt not in visited):
+                    visited.add(nxt)
+                    queue.append(nxt)
+        return False
 
-        # Theo dõi điểm 200 ván cuối cùng của đợt train để đánh giá chất lượng
-        if ep >= episodes - 200:
-            recent_scores.append(score)
+    # TẦM NHÌN TOÀN BẢN ĐỒ: Quét 8 tia xuyên suốt bản đồ (28 đặc trưng)
+    def get_state(self):
+        state = []
+        base_8_idx = self.dir_idx * 2
 
-    avg_score = sum(recent_scores) / len(recent_scores)
-    agent.save_brain(avg_score)
-    
-    # Nạp lại bản tốt nhất để trình diễn (tránh trường hợp đợt vừa rồi bị tụt điểm)
-    agent.load_brain()
+        for i in range(8):
+            d_idx = (base_8_idx + i) % 8
+            dr, dc = self.all_8_dirs[d_idx]
+            
+            curr_r, curr_c = self.head[0] + dr, self.head[1] + dc
+            distance = 1.0
+            found_food = 0.0
+            found_body = 0.0
 
-    pygame.init()
-    window_size = env.grid_size * CELL_SIZE
-    screen = pygame.display.set_mode((window_size, window_size))
-    pygame.display.set_caption("Snake AI - Q-Learning Demo")
-    font = pygame.font.SysFont("Arial", 18, bold=True)
-    clock = pygame.time.Clock()
+            while 0 <= curr_r < self.grid_size and 0 <= curr_c < self.grid_size:
+                if found_food == 0.0 and [curr_r, curr_c] == self.food:
+                    found_food = 1.0
+                if found_body == 0.0 and [curr_r, curr_c] in self.body[1:]:
+                    found_body = 1.0 / distance
+                
+                curr_r += dr
+                curr_c += dc
+                distance += 1.0
 
-    agent.epsilon = 0
-    state = env.reset()
-    total_reward = 0
-    game_num = 1
-    running = True
+            wall_dist = 1.0 / distance
+            state.extend([wall_dist, found_body, found_food])
 
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
+        state.extend([
+            float(self.dir_idx == 0),
+            float(self.dir_idx == 1),
+            float(self.dir_idx == 2),
+            float(self.dir_idx == 3)
+        ])
+        return state
 
-        action = agent.choose_action(state)
-        state, reward, done, score = env.step(action)
-        total_reward += reward
+    def compute_reward(self, is_dead, ate_food, is_looping, has_path_to_tail, old_dist, new_dist):
+        if is_dead:
+            return -15.0
+        if is_looping:
+            return -10.0
+        if ate_food:
+            return 25.0
+        if not has_path_to_tail:
+            return -2.0
+        if new_dist < old_dist:
+            return 0.2
+        return -0.25
 
-        draw_game(screen, font, env, total_reward, game_num)
-        clock.tick(15)
+    def step(self, action):
+        if action == 1:
+            self.dir_idx = (self.dir_idx + 1) % 4
+        elif action == 2:
+            self.dir_idx = (self.dir_idx - 1) % 4
 
-        if done:
-            pygame.time.wait(600)
-            state = env.reset()
-            total_reward = 0
-            game_num += 1
+        old_dist = self._manhattan_dist(self.head, self.food)
+        new_head = [self.head[0] + self.directions[self.dir_idx][0],
+                    self.head[1] + self.directions[self.dir_idx][1]]
+        self.steps_without_food += 1
 
-    pygame.quit()
+        is_dead = self._is_collision(new_head)
+        ate_food = (new_head == self.food)
+        is_looping = (self.steps_without_food > self.grid_size * self.grid_size * 1.5)
+        new_dist = self._manhattan_dist(new_head, self.food)
+
+        done = is_dead or is_looping
+        has_path_to_tail = True
+
+        if not done:
+            self.head = new_head
+            self.body.insert(0, list(new_head))
+            if ate_food:
+                self.score += 1
+                self.steps_without_food = 0
+                self.food = self._spawn_food()
+            else:
+                self.body.pop()
+            has_path_to_tail = self._can_reach_tail(self.head, self.body)
+
+        reward = self.compute_reward(is_dead, ate_food, is_looping, has_path_to_tail, old_dist, new_dist)
+        return self.get_state(), reward, done, self.score
+        
