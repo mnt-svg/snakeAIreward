@@ -103,12 +103,12 @@ class SnakeAIEnvironment:
         if is_looping:
             return -5.0       # Phạt câu giờ: Đi lòng vòng vô nghĩa
         if ate_food:
-            return 10.0       # Thưởng lớn: Đạt mục tiêu ăn quả
+            return 20.0       # Thưởng lớn: Đạt mục tiêu ăn quả
         if not has_path_to_tail:
             return -3.0       # Phạt chiến thuật: Tự nhốt mình vào ngõ cụt (mất đường tới đuôi)
         if new_dist < old_dist:
             return 0.1        # Thưởng định hướng: Tiến lại gần quả
-        return -0.15          # Phạt nhẹ: Đi ra xa quả
+        return -0.1          # Phạt nhẹ: Đi ra xa quả
 
     # --- 3. ACTION & VÒNG LẶP TƯƠNG TÁC ---
     def step(self, action):
