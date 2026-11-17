@@ -2,16 +2,28 @@ import random
 from collections import deque
 
 class SnakeAIEnvironment:
-    def __init__(self, grid_size=10):
+    def __init__(self, grid_size=12):
         self.grid_size = grid_size
-        self.directions = [(-1, 0), (0, 1), (1, 0), (0, -1)] # 0: Lên, 1: Phải, 2: Xuống, 3: Trái
+        # 8 hướng quét theo chiều kim đồng hồ bắt đầu từ Hướng Lên (0)
+        self.all_8_dirs = [
+            (-1, 0),  # 0: Lên
+            (-1, 1),  # 1: Chéo Lên-Phải
+            (0, 1),   # 2: Phải
+            (1, 1),   # 3: Chéo Xuống-Phải
+            (1, 0),   # 4: Xuống
+            (1, -1),  # 5: Chéo Xuống-Trái
+            (0, -1),  # 6: Trái
+            (-1, -1)  # 7: Chéo Lên-Trái
+        ]
+        # 4 hướng di chuyển chính: Lên (0), Phải (1), Xuống (2), Trái (3)
+        self.directions = [(-1, 0), (0, 1), (1, 0), (0, -1)]
         self.reset()
 
     def reset(self):
         mid = self.grid_size // 2
         self.head = [mid, mid]
         self.body = [[mid, mid], [mid, mid - 1], [mid, mid - 2]]
-        self.dir_idx = 1  # Mặc định đi sang phải
+        self.dir_idx = 1
         self.food = self._spawn_food()
         self.score = 0
         self.steps_without_food = 0
@@ -23,25 +35,21 @@ class SnakeAIEnvironment:
             if pos not in self.body:
                 return pos
 
-    def _is_collision(self, pt, body_to_check=None):
-        if body_to_check is None:
-            body_to_check = self.body
+    def _is_collision(self, pt):
         return (
             pt[0] < 0 or pt[0] >= self.grid_size or
             pt[1] < 0 or pt[1] >= self.grid_size or
-            pt in body_to_check
+            pt in self.body
         )
 
     def _manhattan_dist(self, p1, p2):
         return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
 
-    # Thuật toán BFS kiểm tra từ đầu rắn có còn đường tới đuôi hay không
     def _can_reach_tail(self, head_pos, body_list):
         if len(body_list) <= 2:
             return True
         tail = tuple(body_list[-1])
-        obstacles = set(tuple(p) for p in body_list[:-1]) # Bỏ qua ô đuôi vì đuôi sẽ dịch chuyển
-        
+        obstacles = set(tuple(p) for p in body_list[:-1])
         queue = deque([tuple(head_pos)])
         visited = {tuple(head_pos)}
         
@@ -59,60 +67,55 @@ class SnakeAIEnvironment:
                     queue.append(nxt)
         return False
 
-    # --- 1. STATE: "ĐÔI MẮT" CỦA AI (14 đặc trưng số) ---
+    # TẦM NHÌN TOÀN BẢN ĐỒ: Quét 8 tia xuyên suốt bản đồ (28 đặc trưng)
     def get_state(self):
-        # 3 hướng tương đối: [Đi thẳng, Rẽ phải, Rẽ trái]
-        check_dirs = [
-            self.dir_idx,
-            (self.dir_idx + 1) % 4,
-            (self.dir_idx - 1) % 4
-        ]
-        
-        dangers = []
-        reach_tail_flags = []
-        
-        for d in check_dirs:
-            nxt_pt = [self.head[0] + self.directions[d][0], self.head[1] + self.directions[d][1]]
-            is_danger = self._is_collision(nxt_pt)
-            dangers.append(int(is_danger))
-            
-            if is_danger:
-                reach_tail_flags.append(0)
-            else:
-                sim_body = [nxt_pt] + self.body[:-1]
-                reach_tail_flags.append(int(self._can_reach_tail(nxt_pt, sim_body)))
+        state = []
+        base_8_idx = self.dir_idx * 2
 
-        state = [
-            # Nguy hiểm sát bên (3 bit)
-            dangers[0], dangers[1], dangers[2],
-            # Hướng di chuyển hiện tại (4 bit)
-            int(self.dir_idx == 3), int(self.dir_idx == 1),
-            int(self.dir_idx == 0), int(self.dir_idx == 2),
-            # Vị trí quả so với đầu (4 bit)
-            int(self.food[1] < self.head[1]), int(self.food[1] > self.head[1]),
-            int(self.food[0] < self.head[0]), int(self.food[0] > self.head[0]),
-            # Duy trì đường đi tới đuôi (3 bit)
-            reach_tail_flags[0], reach_tail_flags[1], reach_tail_flags[2]
-        ]
+        for i in range(8):
+            d_idx = (base_8_idx + i) % 8
+            dr, dc = self.all_8_dirs[d_idx]
+            
+            curr_r, curr_c = self.head[0] + dr, self.head[1] + dc
+            distance = 1.0
+            found_food = 0.0
+            found_body = 0.0
+
+            while 0 <= curr_r < self.grid_size and 0 <= curr_c < self.grid_size:
+                if found_food == 0.0 and [curr_r, curr_c] == self.food:
+                    found_food = 1.0
+                if found_body == 0.0 and [curr_r, curr_c] in self.body[1:]:
+                    found_body = 1.0 / distance
+                
+                curr_r += dr
+                curr_c += dc
+                distance += 1.0
+
+            wall_dist = 1.0 / distance
+            state.extend([wall_dist, found_body, found_food])
+
+        state.extend([
+            float(self.dir_idx == 0),
+            float(self.dir_idx == 1),
+            float(self.dir_idx == 2),
+            float(self.dir_idx == 3)
+        ])
         return state
 
-    # --- 2. REWARD FUNCTION: MÔ TẢ MỤC TIÊU CHO AI ---
     def compute_reward(self, is_dead, ate_food, is_looping, has_path_to_tail, old_dist, new_dist):
         if is_dead:
-            return -10.0      # Phạt nặng: Đâm tường hoặc cắn thân
+            return -15.0
         if is_looping:
-            return -5.0       # Phạt câu giờ: Đi lòng vòng vô nghĩa
+            return -10.0
         if ate_food:
-            return 20.0       # Thưởng lớn: Đạt mục tiêu ăn quả
+            return 25.0
         if not has_path_to_tail:
-            return -3.0       # Phạt chiến thuật: Tự nhốt mình vào ngõ cụt (mất đường tới đuôi)
+            return -2.0
         if new_dist < old_dist:
-            return 0.1        # Thưởng định hướng: Tiến lại gần quả
-        return -0.1          # Phạt nhẹ: Đi ra xa quả
+            return 0.2
+        return -0.25
 
-    # --- 3. ACTION & VÒNG LẶP TƯƠNG TÁC ---
     def step(self, action):
-        # action: 0 = Đi thẳng, 1 = Rẽ phải, 2 = Rẽ trái
         if action == 1:
             self.dir_idx = (self.dir_idx + 1) % 4
         elif action == 2:
@@ -125,7 +128,7 @@ class SnakeAIEnvironment:
 
         is_dead = self._is_collision(new_head)
         ate_food = (new_head == self.food)
-        is_looping = (self.steps_without_food > self.grid_size * self.grid_size)
+        is_looping = (self.steps_without_food > self.grid_size * self.grid_size * 1.5)
         new_dist = self._manhattan_dist(new_head, self.food)
 
         done = is_dead or is_looping
@@ -144,17 +147,3 @@ class SnakeAIEnvironment:
 
         reward = self.compute_reward(is_dead, ate_food, is_looping, has_path_to_tail, old_dist, new_dist)
         return self.get_state(), reward, done, self.score
-
-if __name__ == "__main__":
-    env = SnakeAIEnvironment(grid_size=10)
-    state = env.reset()
-    total_reward = 0
-    print(f"State khởi tạo (14 features): {state}")
-    
-    for step in range(100):
-        action = random.choice([0, 1, 2]) # Thử nghiệm hành động ngẫu nhiên
-        state, reward, done, score = env.step(action)
-        total_reward += reward
-        if done:
-            print(f"Kết thúc ở bước {step + 1} | Điểm ăn quả: {score} | Tổng Reward: {total_reward:.2f}")
-            break
